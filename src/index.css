@@ -1,0 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');
+
+@import "tailwindcss";
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: #080E1A;
+  color: #E8EDF5;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #080E1A; }
+::-webkit-scrollbar-thumb { background: #1E2A3E; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #CC2200; }
+
+@keyframes livepulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.25; transform: scale(0.6); }
+}
+.live-dot { animation: livepulse 1.8s ease-in-out infinite; }
+
+@keyframes ripple {
+  0%   { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(3); opacity: 0; }
+}
+.pin-ripple { animation: ripple 2.2s ease-out infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.7s ease forwards; }
+
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-inner { animation: ticker 28s linear infinite; }
+.ticker-inner:hover { animation-play-state: paused; }
+
+/* Light mode */
+body.light {
+  background-color: #F4F6FA;
+  color: #0D1525;
+}
+body.light .nav,
+body.light nav {
+  background: #ffffff !important;
+  border-bottom: 1px solid rgba(0,0,0,0.08) !important;
+}
+
+
+/* Better spacing and readability */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+input, textarea, select {
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+/* Smooth page transitions */
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+/* Responsive images */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Remove default button styles */
+button {
+  cursor: pointer;
+}
+
+/* Better mobile touch targets */
+@media (max-width: 768px) {
+  button, a {
+    min-height: 44px;
+  }
+  
+  h1 { font-size: clamp(1.8rem, 6vw, 2.5rem) !important; }
+  h2 { font-size: clamp(1.4rem, 5vw, 2rem) !important; }
+  
+  /* Stack grids on mobile */
+  .mobile-stack {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Tighter padding on very small screens */
+  section, .section {
+    padding: 48px 0 !important;
+  }
+}
