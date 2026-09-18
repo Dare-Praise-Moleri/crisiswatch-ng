@@ -21,7 +21,6 @@ const links = [
   { to: '/map',       label: 'Live Map'  },
   { to: '/incidents', label: 'Incidents' },
   { to: '/report',    label: 'Report'    },
-  { to: '/nlp',       label: 'NLP'       },
   { to: '/about',     label: 'About'     },
 ];
 

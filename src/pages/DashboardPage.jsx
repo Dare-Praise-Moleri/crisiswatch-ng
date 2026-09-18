@@ -38,7 +38,6 @@ const NAV = [
   { to: '/incidents', icon: FileText,        label: 'Incidents', badge: true },
   { to: '/map',       icon: MapPin,          label: 'Live Map'   },
   { to: '/report',    icon: Plus,            label: 'Report'     },
-  { to: '/nlp',       icon: Brain,           label: 'NLP Monitor'},
   { to: '/alerts',    icon: Bell,            label: 'Alerts'     },
   { to: '/profile',   icon: User,            label: 'Profile'    },
 ];
