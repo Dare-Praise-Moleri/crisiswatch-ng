@@ -32,7 +32,7 @@ instance/
 *.session-journal
 *.db
 Dump-*
-*.txt
+# *.txt
 backend/
 " > .gitignore
 
