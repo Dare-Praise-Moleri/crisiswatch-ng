@@ -25,17 +25,20 @@ def create_app():
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'timeout': 30}}
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['JWT_ACCESS_TOKEN_EXPIRES']  = False  # tokens don't expire during dev
 
     # ── Email configuration ──
-    app.config['MAIL_SERVER']   = 'smtp.gmail.com'
-    app.config['MAIL_PORT']     = 587
-    app.config['MAIL_USE_TLS']  = True
-    app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-    app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+    app.config['MAIL_SERVER']         = 'smtp.gmail.com'
+    app.config['MAIL_PORT']           = 587
+    app.config['MAIL_USE_TLS']        = True
+    app.config['MAIL_USE_SSL']        = False
+    app.config['MAIL_USERNAME']       = os.getenv('MAIL_USERNAME')
+    app.config['MAIL_PASSWORD']       = os.getenv('MAIL_PASSWORD')
     app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
+    app.config['MAIL_DEBUG']          = True
 
     # ── Extensions ──
     db.init_app(app)
@@ -63,5 +66,15 @@ def create_app():
     # ── Create all database tables ──
     with app.app_context():
         db.create_all()
+    
+    # ── Start background monitors (RSS, Reddit, Telegram) ──
+        try:
+            from app.scheduler import start_scheduler
+            start_scheduler(app)
+            print('[Init] Scheduler started OK')
+        except Exception as e:
+            import traceback
+            print(f'[Init] Scheduler FAILED: {e}')
+            traceback.print_exc()
 
     return app

@@ -1,45 +1,70 @@
+// ─────────────────────────────────────────────────────────
+//  App.jsx  —  CrisisWatch Lagos  (complete, all routes)
+// ─────────────────────────────────────────────────────────
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { isLoggedIn } from './services/api';
-import NLPPage from './pages/NLPPage';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
-const Protected = ({ children }) => {
-  return isLoggedIn() ? children : <Navigate to="/login" replace />;
-};
+// Theme must wrap everything
+import { ThemeProvider } from './context/ThemeContext';
 
-import Navbar from './components/Navbar';
+// Layout
+import Navbar          from './components/Navbar';
+import ToastContainer  from './components/ToastNotification';
 
-import HomePage     from './pages/HomePage';
-import LoginPage    from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import MapPage      from './pages/MapPage';
-import ReportPage   from './pages/ReportPage';
-import IncidentsPage from './pages/IncidentsPage';
-import AlertsPage   from './pages/AlertsPage';
-import ProfilePage  from './pages/ProfilePage';
-import AboutPage    from './pages/AboutPage';
+// Pages
+import HomePage        from './pages/HomePage';
+import LoginPage       from './pages/LoginPage';
+import DashboardPage   from './pages/DashboardPage';
+import ReportPage      from './pages/ReportPage';
+import IncidentsPage   from './pages/IncidentsPage';
+import MapPage         from './pages/MapPage';
+import AlertsPage      from './pages/AlertsPage';
+import ProfilePage     from './pages/ProfilePage';
+import AboutPage       from './pages/AboutPage';
+import SettingsPage    from './pages/SettingsPage';
+import NLPPage         from './pages/NLPPage';
+import AnalyticsPage   from './pages/AnalyticsPage';   // NEW
+import ResponderPage   from './pages/ResponderPage';   // NEW
 
-
-function App() {
+export default function App() {
   return (
-    <Router>
-      <div className="min-h-screen bg-[#0d1526] text-white">
+    <ThemeProvider>                          {/* ← must be outermost */}
+      <Router>
         <Navbar />
+
         <Routes>
-          <Route path="/"          element={<HomePage />} />
-          <Route path="/login"     element={<LoginPage />} />
-          <Route path="/dashboard" element={<Protected><DashboardPage /></Protected>} />
-          <Route path="/map"       element={<Protected><MapPage /></Protected>} />
-          <Route path="/report"    element={<Protected><ReportPage /></Protected>} />
-          <Route path="/incidents" element={<Protected><IncidentsPage /></Protected>} />
-          <Route path="/alerts"    element={<Protected><AlertsPage /></Protected>} />
-          <Route path="/profile"   element={<Protected><ProfilePage /></Protected>} />
-          <Route path="/about"     element={<Protected><AboutPage /></Protected>} />
-          <Route path="/nlp" element={<Protected><NLPPage /></Protected>} />
+          {/* Public */}
+          <Route path="/"           element={<HomePage />}      />
+          <Route path="/login"      element={<LoginPage />}     />
+          <Route path="/about"      element={<AboutPage />}     />
+
+          {/* Core features */}
+          <Route path="/dashboard"  element={<DashboardPage />} />
+          <Route path="/report"     element={<ReportPage />}    />
+          <Route path="/incidents"  element={<IncidentsPage />} />
+          <Route path="/map"        element={<MapPage />}       />
+          <Route path="/alerts"     element={<AlertsPage />}    />
+
+          {/* Analytics — standalone page */}
+          <Route path="/analytics"  element={<AnalyticsPage />} />
+
+          {/* Responder center management */}
+          <Route path="/responder"  element={<ResponderPage />} />
+
+          {/* NLP lab */}
+          <Route path="/nlp"        element={<NLPPage />}       />
+
+          {/* User */}
+          <Route path="/profile"    element={<ProfilePage />}   />
+          <Route path="/settings"   element={<SettingsPage />}  />
+
+          {/* 404 fallback */}
+          <Route path="*"           element={<HomePage />}      />
         </Routes>
-      </div>
-    </Router>
+
+        {/* Global toast overlay — must be inside ThemeProvider */}
+        <ToastContainer />
+      </Router>
+    </ThemeProvider>
   );
 }
-
-export default App;

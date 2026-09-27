@@ -3,9 +3,19 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
 from app.models import Incident, Alert
 from app.services.email_service import send_incident_alert
+from app.services.resource_allocator import (
+    allocate_responder, dispatch_center,
+    release_center, get_all_centers
+)
 from datetime import datetime
 
 incidents_bp = Blueprint('incidents', __name__)
+
+@incidents_bp.route('/centers', methods=['GET'])
+def get_centers():
+    from app.services.resource_allocator import get_all_centers
+    centers = get_all_centers()
+    return jsonify({ 'centers': centers }), 200
 
 # ── GET ALL INCIDENTS ──
 @incidents_bp.route('/', methods=['GET'])
@@ -98,6 +108,26 @@ def create_incident():
         db.session.add(alert)
 
     db.session.commit()
+
+    # Auto-allocate nearest available responder
+    allocation = None
+    try:
+        inc_dict = incident.to_dict()
+        allocation = allocate_responder(inc_dict)
+        if allocation:
+            dispatch_center(allocation['center_id'], incident.id)
+    except Exception as e:
+        print(f'Allocation error: {e}')
+
+    # Send email alert
+    email_sent = send_incident_alert(incident)
+
+    return jsonify({
+        'message':    'Incident reported successfully',
+        'incident':   incident.to_dict(),
+        'allocation': allocation,
+        'alert_sent': email_sent,
+    }), 201
 
     # Send email alert to agencies for high severity incidents
     email_sent = send_incident_alert(incident)

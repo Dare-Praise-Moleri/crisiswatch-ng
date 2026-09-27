@@ -1,17 +1,28 @@
 from flask_mail import Message
 from app import mail
 from flask import current_app
+import os
 
 # ── REGISTERED AGENCY EMAILS ──
 # In production these come from a database of registered agencies
+# AGENCY_EMAILS = {
+#     'fire':     ['praisemoleri2@gmail.com'],   # Replace with real NEMA email
+#     'crime':    ['praisemoleri2@gmail.com'],
+#     'flood':    ['praisemoleri2@gmail.com'],
+#     'accident': ['praisemoleri2@gmail.com'],
+#     'medical':  ['praisemoleri2@gmail.com'],
+#     'security': ['praisemoleri2@gmail.com'],
+#     'other':    ['praisemoleri2@gmail.com'],
+# }
+
 AGENCY_EMAILS = {
-    'fire':     ['nema.alert@gmail.com'],   # Replace with real NEMA email
-    'crime':    ['nema.alert@gmail.com'],
-    'flood':    ['nema.alert@gmail.com'],
-    'accident': ['nema.alert@gmail.com'],
-    'medical':  ['nema.alert@gmail.com'],
-    'security': ['nema.alert@gmail.com'],
-    'other':    ['nema.alert@gmail.com'],
+    'fire':     [os.getenv('MAIL_USERNAME')],
+    'crime':    [os.getenv('MAIL_USERNAME')],
+    'flood':    [os.getenv('MAIL_USERNAME')],
+    'accident': [os.getenv('MAIL_USERNAME')],
+    'medical':  [os.getenv('MAIL_USERNAME')],
+    'security': [os.getenv('MAIL_USERNAME')],
+    'other':    [os.getenv('MAIL_USERNAME')],
 }
 
 SEV_COLORS = {

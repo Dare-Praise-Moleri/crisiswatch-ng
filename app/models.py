@@ -43,12 +43,18 @@ class Incident(db.Model):
     status      = db.Column(db.String(20), default='Active')  # Active | Responding | Monitoring | Resolved
     source      = db.Column(db.String(50))         # X (Twitter) | WhatsApp | Facebook | User Report
     location    = db.Column(db.String(255))
-    state       = db.Column(db.String(100))
-    lga         = db.Column(db.String(100))
+    # state       = db.Column(db.String(100))
+    # lga         = db.Column(db.String(100))
     landmark    = db.Column(db.String(255))
-    latitude    = db.Column(db.Float)
-    longitude   = db.Column(db.Float)
-    affected    = db.Column(db.Integer, default=0)
+    # latitude    = db.Column(db.Float)
+    # longitude   = db.Column(db.Float)
+    # affected    = db.Column(db.Integer, default=0)
+    latitude    = db.Column(db.Float,   nullable=True)
+    longitude   = db.Column(db.Float,   nullable=True)
+    lga         = db.Column(db.String(100), nullable=True)
+    state       = db.Column(db.String(100), nullable=True, default='Lagos')
+    confidence  = db.Column(db.Float,   nullable=True, default=0.75)
+    affected    = db.Column(db.Integer, nullable=True, default=0)
     responders  = db.Column(db.Integer, default=0)
     media_urls  = db.Column(db.Text, default='')   # comma-separated URLs
     anonymous   = db.Column(db.Boolean, default=False)

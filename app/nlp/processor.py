@@ -1,282 +1,463 @@
+"""
+CrisisWatch Lagos — NLP Processor
+===================================
+Rule-based NER pipeline for emergency detection.
+Every post from every source passes through this.
+
+Pipeline:
+  Raw text → clean → detect type → detect severity
+           → extract location (Lagos gazetteer)
+           → confidence score → structured incident dict
+"""
+
 import re
-import string
 from datetime import datetime
 
-# ── NIGERIAN EMERGENCY KEYWORDS ──
-FIRE_KEYWORDS     = ['fire','burn','burning','flame','smoke','inferno','explosion','blast','explode','kaboom']
-FLOOD_KEYWORDS    = ['flood','flooding','flooded','water','rain','overflow','submerged','underwater','drainage']
-CRIME_KEYWORDS    = ['robbery','robbers','armed','gunmen','thieves','kidnap','kidnapping','attack','attacked','shoot','shooting','shot','kill','killed','stabbed','cultist','cultists','hoodlums','thugs','bandit','bandits']
-ACCIDENT_KEYWORDS = ['accident','crash','collision','hit','run','overturn','crushed','truck','tanker','vehicle','car crash','road crash']
-MEDICAL_KEYWORDS  = ['dead','death','died','dying','injured','injury','casualties','hospital','ambulance','unconscious','bleeding','sick','epidemic','outbreak','cholera','disease']
-SECURITY_KEYWORDS = ['protest','riot','unrest','shooting','gunshots','military','soldiers','police','siren','invasion','attack','bomb','explosive','terrorism','terrorist']
+# ══════════════════════════════════════════════════
+#  EMERGENCY KEYWORDS — what the model looks for
+# ══════════════════════════════════════════════════
 
-SEVERITY_HIGH     = ['dead','killed','fire','explosion','blast','robbery','armed','gunmen','kidnap','critical','emergency','urgent','help','sos','danger','danger','trapped']
-SEVERITY_MEDIUM   = ['accident','crash','flood','injured','hospital','protest','unrest','robbery','stolen']
-SEVERITY_LOW      = ['suspicious','warning','alert','watch','caution','slow','traffic','minor']
+FIRE_KEYWORDS = [
+    'fire', 'burn', 'burning', 'burned', 'burnt', 'flame', 'flames',
+    'smoke', 'inferno', 'explosion', 'blast', 'explode', 'exploded',
+    'razed', 'gutted', 'engulfed', 'ablaze', 'wildfire', 'gas fire',
+    'e don burn', 'fire don start', 'fire outbreak', 'house on fire',
+    'market fire', 'building on fire', 'tanker fire',
+]
 
-# ── NIGERIAN LOCATIONS GAZETTEER ──
-# Maps informal names → (formal name, state, lat, lng)
-NIGERIAN_PLACES = {
-    # Lagos
-    'oshodi':           ('Oshodi',           'Lagos',  6.5480,  3.3515),
-    'lekki':            ('Lekki',            'Lagos',  6.4345,  3.4775),
-    'ikeja':            ('Ikeja',            'Lagos',  6.5958,  3.3398),
-    'victoria island':  ('Victoria Island',  'Lagos',  6.4281,  3.4219),
-    'vi':               ('Victoria Island',  'Lagos',  6.4281,  3.4219),
-    'surulere':         ('Surulere',         'Lagos',  6.5010,  3.3603),
-    'yaba':             ('Yaba',             'Lagos',  6.5095,  3.3750),
-    'mainland':         ('Lagos Mainland',   'Lagos',  6.5095,  3.3750),
-    'island':           ('Lagos Island',     'Lagos',  6.4550,  3.3841),
-    'apapa':            ('Apapa',            'Lagos',  6.4483,  3.3586),
-    'mile 2':           ('Mile 2',           'Lagos',  6.4737,  3.3018),
-    'mile2':            ('Mile 2',           'Lagos',  6.4737,  3.3018),
-    'ikorodu':          ('Ikorodu',          'Lagos',  6.6194,  3.5106),
-    'mushin':           ('Mushin',           'Lagos',  6.5354,  3.3589),
-    'agege':            ('Agege',            'Lagos',  6.6166,  3.3219),
-    'ojota':            ('Ojota',            'Lagos',  6.5975,  3.3831),
-    'ojodu':            ('Ojodu',            'Lagos',  6.6373,  3.3648),
-    'berger':           ('Berger',           'Lagos',  6.6350,  3.3700),
-    'maryland':         ('Maryland',         'Lagos',  6.5694,  3.3578),
-    'ketu':             ('Ketu',             'Lagos',  6.5904,  3.3875),
-    'mile 12':          ('Mile 12',          'Lagos',  6.6169,  3.3910),
-    'iyana ipaja':      ('Iyana Ipaja',      'Lagos',  6.5941,  3.2597),
-    'ipaja':            ('Ipaja',            'Lagos',  6.5941,  3.2597),
-    'dopemu':           ('Dopemu',           'Lagos',  6.5843,  3.2873),
-    'egbeda':           ('Egbeda',           'Lagos',  6.5718,  3.2745),
-    'alimosho':         ('Alimosho',         'Lagos',  6.5718,  3.2745),
-    'festac':           ('Festac Town',      'Lagos',  6.4671,  3.2742),
-    'ajegunle':         ('Ajegunle',         'Lagos',  6.4583,  3.3406),
-    'lagos':            ('Lagos',            'Lagos',  6.5244,  3.3792),
+FLOOD_KEYWORDS = [
+    'flood', 'flooding', 'flooded', 'water rise', 'overflow',
+    'submerged', 'underwater', 'drainage', 'surge', 'heavy rain',
+    'water everywhere', 'road flooded', 'area don drown',
+    'water don enter', 'rain water', 'flash flood',
+]
 
-    # FCT / Abuja
-    'abuja':            ('Abuja',            'FCT',    9.0765,  7.3986),
-    'fct':              ('FCT Abuja',        'FCT',    9.0765,  7.3986),
-    'wuse':             ('Wuse',             'FCT',    9.0691,  7.4836),
-    'wuse 2':           ('Wuse 2',           'FCT',    9.0691,  7.4836),
-    'garki':            ('Garki',            'FCT',    9.0510,  7.4827),
-    'gwarinpa':         ('Gwarinpa',         'FCT',    9.1181,  7.4103),
-    'maitama':          ('Maitama',          'FCT',    9.0838,  7.4892),
-    'asokoro':          ('Asokoro',          'FCT',    9.0401,  7.5233),
-    'kubwa':            ('Kubwa',            'FCT',    9.1481,  7.3197),
-    'nyanya':           ('Nyanya',           'FCT',    8.9946,  7.4325),
-    'mararaba':         ('Mararaba',         'FCT',    8.9978,  7.3786),
-    'lugbe':            ('Lugbe',            'FCT',    8.9753,  7.4267),
-    'bwari':            ('Bwari',            'FCT',    9.2333,  7.3833),
+ACCIDENT_KEYWORDS = [
+    'accident', 'crash', 'collision', 'hit and run', 'overturn',
+    'crushed', 'truck', 'tanker', 'vehicle', 'car crash', 'road crash',
+    'fatal', 'wreck', 'road accident', 'motor accident',
+    'bus crash', 'okada crash', 'danfo crash', 'articulated truck',
+    'multiple vehicle', 'pile up',
+]
 
-    # Rivers
-    'port harcourt':    ('Port Harcourt',    'Rivers', 4.8156,  7.0498),
-    'ph':               ('Port Harcourt',    'Rivers', 4.8156,  7.0498),
-    'trans amadi':      ('Trans Amadi',      'Rivers', 4.8407,  7.0329),
-    'rumuola':          ('Rumuola',          'Rivers', 4.8251,  7.0264),
-    'rumuokoro':        ('Rumuokoro',        'Rivers', 4.8649,  7.0299),
-    'eleme':            ('Eleme',            'Rivers', 4.7692,  7.1478),
-    'bonny':            ('Bonny Island',     'Rivers', 4.4386,  7.1528),
+MEDICAL_KEYWORDS = [
+    'dead', 'death', 'died', 'dying', 'injured', 'injury', 'casualties',
+    'hospital', 'ambulance', 'unconscious', 'bleeding', 'sick',
+    'epidemic', 'outbreak', 'cholera', 'disease', 'cardiac', 'collapse',
+    'person don collapse', 'need doctor', 'need ambulance', 'body found',
+    'corpse', 'dead body', 'critical condition', 'emergency room',
+]
 
-    # Kano
-    'kano':             ('Kano',             'Kano',   12.0022, 8.5919),
-    'sabon gari':       ('Sabon Gari',       'Kano',   12.0022, 8.5919),
-    'kofar':            ('Kofar',            'Kano',   12.0022, 8.5919),
+CRIME_KEYWORDS = [
+    'robbery', 'robbers', 'armed', 'gunmen', 'thieves', 'thief',
+    'kidnap', 'kidnapping', 'kidnapped', 'attack', 'attacked',
+    'shoot', 'shooting', 'shot', 'kill', 'killed', 'stabbed',
+    'cultist', 'hoodlums', 'thugs', 'bandit', 'bandits', 'rape',
+    'murder', 'assassin', 'one chance', 'car snatching', 'phone snatched',
+    'bag snatched', 'boys dey operate', 'area boys', 'agberos',
+    'armed robbery', 'they are shooting', 'gunshot heard',
+]
 
-    # Borno
-    'maiduguri':        ('Maiduguri',        'Borno',  11.8311, 13.1510),
-    'borno':            ('Borno',            'Borno',  11.8311, 13.1510),
+SECURITY_KEYWORDS = [
+    'protest', 'riot', 'unrest', 'military', 'soldiers', 'police',
+    'invasion', 'bomb', 'explosive', 'terrorism', 'terrorist',
+    'crisis', 'demonstration', 'EndSARS', 'occupy', 'barricade',
+    'tear gas', 'water cannon', 'curfew', 'lockdown',
+]
 
-    # Ogun
-    'sagamu':           ('Sagamu',           'Ogun',   6.8399,  3.6476),
-    'abeokuta':         ('Abeokuta',         'Ogun',   7.1557,  3.3451),
-    'ota':              ('Ota',              'Ogun',   6.6862,  3.2341),
-    'ijebu ode':        ('Ijebu Ode',        'Ogun',   6.8186,  3.9174),
+# ── Severity indicators ──
+SEVERITY_CRITICAL = [
+    'many dead', 'multiple casualties', 'mass casualty', 'explosion',
+    'building collapse', 'trapped', 'people trapped', 'fatalities',
+    'bodies recovered', 'sos', 'help us', 'no one is coming',
+    'na die dem die', 'e don kill person', 'multiple dead',
+]
+SEVERITY_HIGH = [
+    'fire', 'robbery', 'armed', 'gunmen', 'kidnap', 'urgent',
+    'help', 'danger', 'critical', 'emergency', 'shoot', 'shot',
+    'injured', 'blast', 'explosion', 'na serious tin', 'e don bad',
+]
+SEVERITY_MEDIUM = [
+    'accident', 'crash', 'flood', 'hospital', 'protest',
+    'robbery', 'stolen', 'flooding', 'road blocked',
+]
+SEVERITY_LOW = [
+    'suspicious', 'warning', 'alert', 'watch', 'caution',
+    'minor', 'slow traffic', 'road closed',
+]
 
-    # Oyo
-    'ibadan':           ('Ibadan',           'Oyo',    7.3775,  3.9470),
-    'ojoo':             ('Ojoo',             'Oyo',    7.4355,  3.8948),
-    'bodija':           ('Bodija',           'Oyo',    7.4104,  3.8966),
-    'challenge':        ('Challenge',        'Oyo',    7.3610,  3.8969),
-    'ring road':        ('Ring Road',        'Oyo',    7.3793,  3.8924),
+# ══════════════════════════════════════════════════
+#  LAGOS GAZETTEER — 100+ locations with GPS
+#  Format: 'keyword': ('Display Name', 'LGA', lat, lng)
+# ══════════════════════════════════════════════════
 
-    # Delta
-    'warri':            ('Warri',            'Delta',  5.5167,  5.7500),
-    'asaba':            ('Asaba',            'Delta',  6.1981,  6.7336),
-    'sapele':           ('Sapele',           'Delta',  5.8920,  5.6788),
+LAGOS_PLACES = {
+    # ── MAINLAND ──
+    'oshodi':                  ('Oshodi',                  'Oshodi-Isolo',    6.5480, 3.3515),
+    'mushin':                  ('Mushin',                  'Mushin',          6.5354, 3.3589),
+    'yaba':                    ('Yaba',                    'Lagos Mainland',  6.5095, 3.3750),
+    'surulere':                ('Surulere',                'Surulere',        6.5010, 3.3603),
+    'ebute metta':             ('Ebute Metta',             'Lagos Mainland',  6.4833, 3.3833),
+    'apapa':                   ('Apapa',                   'Apapa',           6.4483, 3.3586),
+    'ajegunle':                ('Ajegunle',                'Ajeromi-Ifelodun',6.4583, 3.3406),
+    'agege':                   ('Agege',                   'Agege',           6.6166, 3.3219),
+    'ikeja':                   ('Ikeja',                   'Ikeja',           6.5958, 3.3398),
+    'maryland':                ('Maryland',                'Ikeja',           6.5694, 3.3578),
+    'ketu':                    ('Ketu',                    'Kosofe',          6.5904, 3.3875),
+    'ojota':                   ('Ojota',                   'Kosofe',          6.5975, 3.3831),
+    'mile 12':                 ('Mile 12',                 'Kosofe',          6.6169, 3.3910),
+    'ikorodu':                 ('Ikorodu',                 'Ikorodu',         6.6194, 3.5106),
+    'bariga':                  ('Bariga',                  'Shomolu',         6.5333, 3.3833),
+    'shomolu':                 ('Shomolu',                 'Shomolu',         6.5333, 3.3833),
+    'kosofe':                  ('Kosofe',                  'Kosofe',          6.5667, 3.4000),
+    'gbagada':                 ('Gbagada',                 'Kosofe',          6.5500, 3.3833),
+    'palmgrove':               ('Palm Grove',              'Shomolu',         6.5333, 3.3667),
+    'onipanu':                 ('Onipanu',                 'Shomolu',         6.5500, 3.3667),
+    'anthony':                 ('Anthony Village',         'Ikeja',           6.5667, 3.3667),
+    'ojuelegba':               ('Ojuelegba',               'Surulere',        6.5000, 3.3667),
+    'costain':                 ('Costain',                 'Lagos Mainland',  6.4833, 3.3667),
+    'orile':                   ('Orile',                   'Ajeromi-Ifelodun',6.4833, 3.3500),
+    'otto':                    ('Otto',                    'Lagos Island',    6.4667, 3.3667),
+    'idi araba':               ('Idi Araba',               'Surulere',        6.5104, 3.3603),
 
-    # Enugu
-    'enugu':            ('Enugu',            'Enugu',  6.4483,  7.5136),
-    'nsukka':           ('Nsukka',           'Enugu',  6.8567,  7.3958),
+    # ── LAGOS ISLAND ──
+    'lagos island':            ('Lagos Island',            'Lagos Island',    6.4550, 3.3841),
+    'victoria island':         ('Victoria Island',         'Eti-Osa',         6.4281, 3.4219),
+    'vi':                      ('Victoria Island',         'Eti-Osa',         6.4281, 3.4219),
+    'ikoyi':                   ('Ikoyi',                   'Eti-Osa',         6.4500, 3.4333),
+    'onikan':                  ('Onikan',                  'Lagos Island',    6.4500, 3.3833),
+    'marina':                  ('Marina',                  'Lagos Island',    6.4500, 3.3833),
+    'broad street':            ('Broad Street',            'Lagos Island',    6.4500, 3.3833),
+    'tinubu':                  ('Tinubu Square',           'Lagos Island',    6.4550, 3.3841),
+    'obalende':                ('Obalende',                'Eti-Osa',         6.4500, 3.4000),
+    'cms':                     ('CMS',                     'Lagos Island',    6.4500, 3.3833),
+    'idumota':                 ('Idumota',                 'Lagos Island',    6.4600, 3.3900),
+    'balogun':                 ('Balogun Market',          'Lagos Island',    6.4550, 3.3900),
 
-    # Anambra
-    'onitsha':          ('Onitsha',          'Anambra',6.1428,  6.7862),
-    'awka':             ('Awka',             'Anambra',6.2097,  7.0732),
-    'nnewi':            ('Nnewi',            'Anambra',6.0207,  6.9209),
+    # ── LEKKI / AJAH AXIS ──
+    'lekki':                   ('Lekki',                   'Eti-Osa',         6.4345, 3.4775),
+    'lekki phase 1':           ('Lekki Phase 1',           'Eti-Osa',         6.4345, 3.4775),
+    'lekki phase 2':           ('Lekki Phase 2',           'Eti-Osa',         6.4500, 3.5167),
+    'ajah':                    ('Ajah',                    'Eti-Osa',         6.4667, 3.5833),
+    'sangotedo':               ('Sangotedo',               'Ibeju-Lekki',     6.4500, 3.6000),
+    'chevron':                 ('Chevron Drive',           'Eti-Osa',         6.4333, 3.5167),
+    'jakande':                 ('Jakande',                 'Eti-Osa',         6.4667, 3.5667),
+    'igbo efon':               ('Igbo Efon',               'Eti-Osa',         6.4500, 3.5500),
+    'orchid':                  ('Orchid Road',             'Ibeju-Lekki',     6.4167, 3.5500),
+    'abraham adesanya':        ('Abraham Adesanya',        'Ibeju-Lekki',     6.4667, 3.5833),
+    'badore':                  ('Badore',                  'Ibeju-Lekki',     6.4667, 3.6000),
+    'epe':                     ('Epe',                     'Epe',             6.5833, 3.9833),
+    'ibeju':                   ('Ibeju-Lekki',             'Ibeju-Lekki',     6.4500, 3.7167),
 
-    # Kaduna
-    'kaduna':           ('Kaduna',           'Kaduna', 10.5264, 7.4382),
-    'zaria':            ('Zaria',            'Kaduna', 11.0790, 7.7049),
+    # ── BADAGRY / FESTAC / OJO AXIS ──
+    'festac':                  ('Festac Town',             'Amuwo-Odofin',    6.4671, 3.2742),
+    'mile 2':                  ('Mile 2',                  'Amuwo-Odofin',    6.4737, 3.3018),
+    'mile2':                   ('Mile 2',                  'Amuwo-Odofin',    6.4737, 3.3018),
+    'badagry':                 ('Badagry',                 'Badagry',         6.4167, 2.8833),
+    'satellite town':          ('Satellite Town',          'Ojo',             6.4500, 3.2833),
+    'trade fair':              ('Trade Fair Complex',      'Ojo',             6.4667, 3.2833),
+    'alaba':                   ('Alaba International',     'Ojo',             6.4667, 3.2500),
+    'ojo':                     ('Ojo',                     'Ojo',             6.4667, 3.2167),
+    'volks':                   ('Volkswagen Bus Stop',     'Ojo',             6.4500, 3.2833),
+    'amje':                    ('Amje',                    'Badagry',         6.4167, 3.0000),
 
-    # Others
-    'jos':              ('Jos',              'Plateau',9.8965,  8.8583),
-    'benin city':       ('Benin City',       'Edo',    6.3350,  5.6037),
-    'benin':            ('Benin City',       'Edo',    6.3350,  5.6037),
-    'sokoto':           ('Sokoto',           'Sokoto', 13.0059, 5.2476),
-    'owerri':           ('Owerri',           'Imo',    5.4836,  7.0333),
-    'uyo':              ('Uyo',              'Akwa Ibom',5.0377,7.9128),
-    'calabar':          ('Calabar',          'Cross River',4.9517,8.3220),
-    'makurdi':          ('Makurdi',          'Benue',  7.7322,  8.5391),
-    'lokoja':           ('Lokoja',           'Kogi',   7.7974,  6.7337),
-    'ilorin':           ('Ilorin',           'Kwara',  8.5004,  4.5503),
-    'akure':            ('Akure',            'Ondo',   7.2526,  5.1945),
-    'ado ekiti':        ('Ado Ekiti',        'Ekiti',  7.6219,  5.2210),
+    # ── ALIMOSHO / IPAJA AXIS ──
+    'alimosho':                ('Alimosho',                'Alimosho',        6.5718, 3.2745),
+    'ipaja':                   ('Ipaja',                   'Alimosho',        6.5941, 3.2597),
+    'iyana ipaja':             ('Iyana Ipaja',             'Alimosho',        6.5941, 3.2597),
+    'dopemu':                  ('Dopemu',                  'Agege',           6.5843, 3.2873),
+    'egbeda':                  ('Egbeda',                  'Alimosho',        6.5718, 3.2745),
+    'idimu':                   ('Idimu',                   'Alimosho',        6.5500, 3.2500),
+    'ikotun':                  ('Ikotun',                  'Alimosho',        6.5167, 3.2833),
+    'igando':                  ('Igando',                  'Alimosho',        6.5000, 3.2833),
+    'isheri':                  ('Isheri',                  'Ifako-Ijaiye',    6.6500, 3.3167),
+    'abule egba':              ('Abule Egba',              'Agege',           6.6167, 3.2833),
+    'meiran':                  ('Meiran',                  'Ifako-Ijaiye',    6.6333, 3.2833),
+    'pen cinema':              ('Pen Cinema',              'Agege',           6.6200, 3.3100),
+    'command':                 ('Command',                 'Ifako-Ijaiye',    6.6500, 3.3000),
+
+    # ── OJODU / BERGER / NORTH ──
+    'ogudu':                   ('Ogudu',                   'Kosofe',          6.5667, 3.4000),
+    'ojodu':                   ('Ojodu',                   'Kosofe',          6.6373, 3.3648),
+    'berger':                  ('Berger',                  'Kosofe',          6.6350, 3.3700),
+    'omole':                   ('Omole',                   'Kosofe',          6.6333, 3.3333),
+    'magodo':                  ('Magodo',                  'Kosofe',          6.6000, 3.3667),
+    'shangisha':               ('Shangisha',               'Kosofe',          6.6333, 3.3833),
+    'ojokoro':                 ('Ojokoro',                 'Ifako-Ijaiye',    6.6667, 3.3167),
+    'agidingbi':               ('Agidingbi',               'Ikeja',           6.6000, 3.3333),
+    'oregun':                  ('Oregun',                  'Ikeja',           6.6000, 3.3500),
+    'alausa':                  ('Alausa',                  'Ikeja',           6.5833, 3.3500),
+    'secretariat':             ('Lagos Secretariat',       'Ikeja',           6.5833, 3.3500),
+
+    # ── HIGHWAYS & KEY LANDMARKS ──
+    'third mainland bridge':   ('Third Mainland Bridge',   'Lagos Mainland',  6.5000, 3.3833),
+    'carter bridge':           ('Carter Bridge',           'Lagos Island',    6.4667, 3.3833),
+    'eko bridge':              ('Eko Bridge',              'Lagos Mainland',  6.4667, 3.3667),
+    'lekki toll':              ('Lekki Toll Gate',         'Eti-Osa',         6.4333, 3.5167),
+    'oshodi under bridge':     ('Oshodi Under Bridge',     'Oshodi-Isolo',    6.5480, 3.3515),
+    'under bridge':            ('Oshodi Under Bridge',     'Oshodi-Isolo',    6.5480, 3.3515),
+    'mile 2 bridge':           ('Mile 2 Bridge',           'Amuwo-Odofin',    6.4737, 3.3018),
+    'tin can':                 ('Tin Can Island Port',     'Apapa',           6.4333, 3.3167),
+    'apapa port':              ('Apapa Port',              'Apapa',           6.4333, 3.3833),
+    'murtala airport':         ('Murtala Muhammed Airport','Ikeja',           6.5774, 3.3214),
+    'lagos airport':           ('Lagos Airport',           'Ikeja',           6.5774, 3.3214),
+    'muritala':                ('Murtala Muhammed Airport','Ikeja',           6.5774, 3.3214),
+    'lagos ibadan expressway': ('Lagos-Ibadan Expressway', 'Ifako-Ijaiye',    6.7000, 3.3500),
+    'long bridge':             ('Lagos-Ibadan Long Bridge','Ifako-Ijaiye',    6.7000, 3.3500),
+    'ojota bus stop':          ('Ojota Bus Stop',          'Kosofe',          6.5975, 3.3831),
+    'national stadium':        ('National Stadium',        'Surulere',        6.4952, 3.3676),
+    'tafawa balewa':           ('Tafawa Balewa Square',    'Lagos Island',    6.4552, 3.3900),
 }
 
+# ══════════════════════════════════════════════════
+#  LAGOS KEYWORD FILTER
+#  A post must mention Lagos or a known Lagos place
+#  to be saved. Keeps non-Lagos posts out.
+# ══════════════════════════════════════════════════
+
+LAGOS_KEYWORDS = [
+    'lagos', 'lasgidi', 'eko', 'naija', 'nigeria',
+] + list(LAGOS_PLACES.keys())
+
+
+def is_lagos_related(text_lower):
+    """Return True only if text mentions Lagos or a known Lagos location."""
+    return any(kw in text_lower for kw in LAGOS_KEYWORDS)
+
+
+# ══════════════════════════════════════════════════
+#  SAMPLE POSTS — realistic Lagos Pidgin + English
+#  Used as simulation fallback when DB < 10 incidents
+#  These represent CLASS B seed data
+# ══════════════════════════════════════════════════
+
+SAMPLE_POSTS = [
+    # Fire incidents
+    {'text': 'Na fire burn for under bridge near Oshodi this morning o! Plenty smoke dey rise. Lagos Fire Service come abeg', 'source': 'X (Twitter)'},
+    {'text': 'Fire outbreak for Balogun market Lagos Island. Traders running everywhere. Fire service not yet arrive', 'source': 'WhatsApp'},
+    {'text': 'Tanker fire on Third Mainland Bridge Lagos. Traffic go bad. Avoid that road now', 'source': 'X (Twitter)'},
+    {'text': 'Gas explosion for Apapa port area. Thick black smoke everywhere. Fire service needed urgently', 'source': 'Facebook'},
+    {'text': 'Building engulfed in fire at Mushin Lagos. People shouting for help, nobody to rescue them', 'source': 'WhatsApp'},
+
+    # Flood incidents
+    {'text': 'Serious flood for Mile 2 road in Lagos. Many cars don drown for the water. LASEMA where una dey?', 'source': 'Facebook'},
+    {'text': 'Heavy flooding at Festac Town Lagos. Roads completely submerged. Residents need evacuation', 'source': 'X (Twitter)'},
+    {'text': 'Third Mainland Bridge approach flooded after heavy rain. Traffic standstill, road almost impassable', 'source': 'WhatsApp'},
+    {'text': 'Water don enter houses for Ajah Lagos. Residents stranded. NEMA please respond', 'source': 'Facebook'},
+    {'text': 'Lekki Phase 1 drainage overflow. Cars floating on the road. Avoid Admiralty Way', 'source': 'X (Twitter)'},
+
+    # Accidents
+    {'text': 'Multiple car crash on Lagos Ibadan expressway near Berger. People dey injured, FRSC not yet on ground', 'source': 'X (Twitter)'},
+    {'text': 'Road accident at Ojota junction Lagos. Ambulance needed urgently, people badly injured on the road', 'source': 'WhatsApp'},
+    {'text': 'Danfo bus overturn at Oshodi bus stop. Passengers trapped inside. Come and help abeg', 'source': 'Facebook'},
+    {'text': 'Articulated truck crash on Apapa wharf road. Road blocked completely. Avoid that axis', 'source': 'X (Twitter)'},
+    {'text': 'Okada accident on Surulere road. Rider unconscious, passenger bleeding badly. Need ambulance', 'source': 'WhatsApp'},
+
+    # Crime / Security
+    {'text': 'Armed robbers dey operate for Lekki Phase 1 junction now now! Make people avoid that road', 'source': 'WhatsApp'},
+    {'text': 'Shooting for Ajegunle Lagos, hoodlums attacking people on the street. Police needed immediately', 'source': 'X (Twitter)'},
+    {'text': 'Gunshots heard for Surulere area tonight. Residents should stay indoors. Police been alerted', 'source': 'Facebook'},
+    {'text': 'Kidnapping attempt for Magodo estate Lagos. Security alert! Parents lock your children inside', 'source': 'WhatsApp'},
+    {'text': 'One chance robbers operating along Ikorodu road. They snatching phones and bags from passengers', 'source': 'X (Twitter)'},
+
+    # Medical
+    {'text': 'Medical emergency for Yaba Lagos. Person don collapse for the road, need ambulance ASAP', 'source': 'X (Twitter)'},
+    {'text': 'Multiple persons injured at Ojuelegba accident. They need blood urgently at LUTH hospital', 'source': 'Facebook'},
+    {'text': 'Old woman collapsed at CMS bus stop Lagos Island. People just watching, nobody calling ambulance', 'source': 'WhatsApp'},
+    {'text': 'Cholera outbreak reported in Ajegunle community. Health officials please respond urgently', 'source': 'X (Twitter)'},
+    {'text': 'Man shot by stray bullet in Surulere, bleeding heavily. Please someone call LASEMA 767', 'source': 'WhatsApp'},
+]
+
+
+# ══════════════════════════════════════════════════
+#  CORE NLP FUNCTIONS
+# ══════════════════════════════════════════════════
+
 def clean_text(text):
-    """Remove links, emojis, extra spaces from raw social media text."""
-    # Remove URLs
-    text = re.sub(r'http\S+|www\.\S+', '', text)
-    # Remove @mentions
-    text = re.sub(r'@\w+', '', text)
-    # Remove hashtags symbol but keep the word
-    text = re.sub(r'#(\w+)', r'\1', text)
-    # Remove emojis
-    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
-    # Remove extra whitespace
+    """Remove URLs, handles, hashtag symbols, emojis, extra whitespace."""
+    text = re.sub(r'http\S+|www\.\S+', '', text)       # URLs
+    text = re.sub(r'@\w+', '', text)                    # @handles
+    text = re.sub(r'#(\w+)', r'\1', text)               # #hashtags → word
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)         # non-ASCII (emojis)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+
 def detect_event_type(text_lower):
-    """Detect the type of emergency from text."""
+    """
+    Score each category by keyword matches.
+    Returns the highest-scoring category.
+    Falls back to 'other' if nothing matches.
+    """
     scores = {
         'fire':     sum(1 for k in FIRE_KEYWORDS     if k in text_lower),
-        'crime':    sum(1 for k in CRIME_KEYWORDS     if k in text_lower),
         'flood':    sum(1 for k in FLOOD_KEYWORDS     if k in text_lower),
         'accident': sum(1 for k in ACCIDENT_KEYWORDS  if k in text_lower),
         'medical':  sum(1 for k in MEDICAL_KEYWORDS   if k in text_lower),
+        'crime':    sum(1 for k in CRIME_KEYWORDS     if k in text_lower),
         'security': sum(1 for k in SECURITY_KEYWORDS  if k in text_lower),
     }
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else 'other'
+    best_type  = max(scores, key=scores.get)
+    best_score = scores[best_type]
+    return best_type if best_score > 0 else 'other'
 
-def detect_severity(text_lower):
-    """Detect severity level from text."""
-    high_score   = sum(1 for k in SEVERITY_HIGH   if k in text_lower)
-    medium_score = sum(1 for k in SEVERITY_MEDIUM if k in text_lower)
-    low_score    = sum(1 for k in SEVERITY_LOW    if k in text_lower)
 
-    if high_score >= 2:   return 'critical'
-    if high_score >= 1:   return 'high'
-    if medium_score >= 1: return 'medium'
-    if low_score >= 1:    return 'low'
+def detect_severity(text_lower, event_type):
+    """
+    Determine severity. Critical overrides everything.
+    Event type gives a baseline (fire/crime default to high).
+    """
+    crit_hits = sum(1 for k in SEVERITY_CRITICAL if k in text_lower)
+    high_hits = sum(1 for k in SEVERITY_HIGH     if k in text_lower)
+    med_hits  = sum(1 for k in SEVERITY_MEDIUM   if k in text_lower)
+    low_hits  = sum(1 for k in SEVERITY_LOW      if k in text_lower)
+
+    if crit_hits >= 1:                         return 'critical'
+    if high_hits >= 2:                         return 'high'
+    if event_type in ('fire', 'crime'):        return 'high'
+    if high_hits >= 1:                         return 'high'
+    if med_hits  >= 1:                         return 'medium'
+    if low_hits  >= 1:                         return 'low'
     return 'medium'
+
 
 def extract_location(text_lower):
     """
-    Extract Nigerian location from text using the gazetteer.
-    Returns (formal_name, state, lat, lng) or None.
+    Scan text for Lagos place names using the gazetteer.
+    Matches longest names first to avoid partial matches
+    (e.g. 'lekki phase 1' before 'lekki').
+    Returns dict with name, LGA, latitude, longitude — or None.
     """
-    # Sort by length descending so "victoria island" matches before "island"
-    sorted_places = sorted(NIGERIAN_PLACES.keys(), key=len, reverse=True)
-    for place in sorted_places:
-        if place in text_lower:
-            data = NIGERIAN_PLACES[place]
+    sorted_places = sorted(LAGOS_PLACES.keys(), key=len, reverse=True)
+    for place_key in sorted_places:
+        if place_key in text_lower:
+            name, lga, lat, lng = LAGOS_PLACES[place_key]
             return {
-                'name':      data[0],
-                'state':     data[1],
-                'latitude':  data[2],
-                'longitude': data[3],
+                'name':      name,
+                'lga':       lga,
+                'state':     'Lagos',
+                'latitude':  lat,
+                'longitude': lng,
             }
     return None
 
-def extract_time(text_lower):
-    """Extract time references from text."""
-    time_patterns = [
-        r'\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b',
-        r'\b(this morning)\b',
-        r'\b(this afternoon)\b',
-        r'\b(this evening)\b',
-        r'\b(tonight)\b',
-        r'\b(last night)\b',
-        r'\b(just now)\b',
-        r'\b(few minutes ago)\b',
-        r'\b(yesterday)\b',
-        r'\b(now)\b',
+
+def extract_time_reference(text_lower):
+    """Extract informal time references from social media text."""
+    patterns = [
+        (r'\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b', '{}'),
+        (r'\b(this morning)\b',   'This morning'),
+        (r'\b(this afternoon)\b', 'This afternoon'),
+        (r'\b(this evening)\b',   'This evening'),
+        (r'\b(tonight)\b',        'Tonight'),
+        (r'\b(last night)\b',     'Last night'),
+        (r'\b(just now)\b',       'Just now'),
+        (r'\b(now now)\b',        'Right now'),
+        (r'\b(few minutes ago)\b','Few minutes ago'),
+        (r'\b(yesterday)\b',      'Yesterday'),
     ]
-    for pattern in time_patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            return match.group(1)
+    for pattern, fmt in patterns:
+        m = re.search(pattern, text_lower)
+        if m:
+            return fmt.format(m.group(1)) if '{}' in fmt else fmt
     return 'Not specified'
 
-def calculate_confidence(event_type, location, text_lower):
-    """Calculate confidence score for extraction."""
-    score = 0.5  # base
-    if event_type != 'other':   score += 0.2
-    if location:                score += 0.2
-    if len(text_lower) > 50:    score += 0.1
+
+def calculate_confidence(event_type, location, text_lower, source):
+    """
+    Confidence score 0.0–1.0.
+    Higher = more likely to be a real emergency.
+    Threshold for auto-save: 0.7
+    """
+    score = 0.35  # base
+
+    if event_type != 'other':
+        score += 0.25  # clear emergency type detected
+
+    if location:
+        score += 0.20  # location extracted
+
+    if len(text_lower) > 50:
+        score += 0.10  # longer text = more context
+
+    if source in ('User Report',):
+        score += 0.10  # direct user reports get boost
+
+    # Urgency words push confidence up
+    urgency = ['help', 'urgent', 'abeg', 'sos', 'please', 'now', 'emergency']
+    if any(u in text_lower for u in urgency):
+        score += 0.05
+
     return round(min(score, 1.0), 2)
+
+
+def build_title(event_type, location, text):
+    """Generate a clean incident title."""
+    type_labels = {
+        'fire':     'Fire Incident',
+        'flood':    'Flood Emergency',
+        'accident': 'Road Accident',
+        'medical':  'Medical Emergency',
+        'crime':    'Security Incident',
+        'security': 'Security Alert',
+        'other':    'Emergency Report',
+    }
+    label = type_labels.get(event_type, 'Emergency Report')
+    if location:
+        return f"{label} — {location['name']}, Lagos"
+    return f"{label} — Lagos State"
+
+
+# ══════════════════════════════════════════════════
+#  MAIN ENTRY POINT
+# ══════════════════════════════════════════════════
 
 def process_text(text, source='User Report'):
     """
-    Main NLP function. Takes raw social media text,
-    returns structured incident data.
+    Main NLP function. Takes raw text from any source,
+    returns structured incident dict or None.
+
+    Called by:
+    - RSS monitor      (news articles)
+    - Reddit monitor   (posts from r/Lagos)
+    - Telegram monitor (channel messages)
+    - Report API       (direct user submissions)
+    - NLP demo page    (manual testing)
     """
     if not text or not text.strip():
         return None
 
-    # Step 1: Clean
-    cleaned   = clean_text(text)
+    cleaned    = clean_text(text)
     text_lower = cleaned.lower()
 
-    # Step 2: Extract entities
-    event_type = detect_event_type(text_lower)
-    severity   = detect_severity(text_lower)
-    location   = extract_location(text_lower)
-    time_ref   = extract_time(text_lower)
-    confidence = calculate_confidence(event_type, location, text_lower)
+    # Lagos filter — only process Lagos-related content
+    if not is_lagos_related(text_lower):
+        return None
 
-    # Step 3: Build result
-    result = {
-        'original_text': text,
-        'cleaned_text':  cleaned,
-        'event_type':    event_type,
-        'severity':      severity,
-        'time_ref':      time_ref,
-        'confidence':    confidence,
-        'source':        source,
+    event_type = detect_event_type(text_lower)
+    severity   = detect_severity(text_lower, event_type)
+    location   = extract_location(text_lower)
+    time_ref   = extract_time_reference(text_lower)
+    confidence = calculate_confidence(event_type, location, text_lower, source)
+    title      = build_title(event_type, location, cleaned)
+
+    return {
+        'original_text':   text,
+        'cleaned_text':    cleaned,
+        'suggested_title': title,
+        'event_type':      event_type,
+        'severity':        severity,
+        'time_ref':        time_ref,
+        'confidence':      confidence,
+        'source':          source,
+        'location':        location,
         'entities': {
             'event':    event_type.upper(),
-            'location': location['name']  if location else 'Unknown',
-            'state':    location['state'] if location else 'Unknown',
+            'location': location['name']  if location else 'Lagos',
+            'lga':      location['lga']   if location else 'Unknown',
+            'state':    'Lagos',
             'time':     time_ref,
             'severity': severity.upper(),
         },
-        'location': location,
         'processed_at': datetime.utcnow().isoformat(),
     }
-
-    # Step 4: Build incident title from extraction
-    if location:
-        result['suggested_title'] = f"{event_type.capitalize()} incident — {location['name']}, {location['state']}"
-    else:
-        result['suggested_title'] = f"{event_type.capitalize()} incident reported"
-
-    return result
-
-
-# ── SIMULATED SOCIAL MEDIA POSTS ──
-# These are realistic Nigerian emergency posts
-# used to demonstrate the pipeline
-SAMPLE_POSTS = [
-    { 'text': 'Na fire burn for under bridge near Mile 2 this morning o! Plenty smoke dey rise up. LASG do something abeg', 'source': 'X (Twitter)' },
-    { 'text': 'Armed robbers dey operate for Lekki Phase 1 junction now now! Make people avoid that road', 'source': 'WhatsApp' },
-    { 'text': 'Serious flood for Mararaba road in Abuja. Many cars don drown for the water. NEMA where una dey?', 'source': 'Facebook' },
-    { 'text': 'Multiple car crash on Lagos Ibadan expressway near Sagamu. People dey injured, FRSC not yet on ground', 'source': 'X (Twitter)' },
-    { 'text': 'Gas explosion in Trans Amadi Port Harcourt. The whole area don scatter. Fire service come quick!', 'source': 'X (Twitter)' },
-    { 'text': 'Gunshots heard in Maiduguri road, Borno state. Residents should stay indoors. Military has been alerted', 'source': 'Facebook' },
-    { 'text': 'Building collapse in Kano city, people trapped inside. Rescue team needed urgently', 'source': 'WhatsApp' },
-    { 'text': 'Flooding in Warri, Delta state. Several communities cut off from access. Boats needed', 'source': 'Facebook' },
-    { 'text': 'Road accident at Wuse 2 junction Abuja. Ambulance needed urgently, people badly injured', 'source': 'X (Twitter)' },
-    { 'text': 'Fire outbreak at Ibadan market, ring road area. Fire service not yet arrive, things burning', 'source': 'WhatsApp' },
-    { 'text': 'Shooting at Surulere Lagos, hoodlums attacking people. Police needed immediately please', 'source': 'X (Twitter)' },
-    { 'text': 'Heavy flood don overtake Sagamu interchange on Lagos Ibadan expressway. Traffic jam everywhere', 'source': 'Facebook' },
-    { 'text': 'Kidnapping attempt at Gwarinpa Abuja. Parents lock your children inside. Very dangerous now', 'source': 'WhatsApp' },
-    { 'text': 'Medical emergency at Onitsha Anambra. Tanker accident, chemical spill, people coughing and sick', 'source': 'X (Twitter)' },
-    { 'text': 'Explosion and fire at Apapa port Lagos. Thick black smoke. Area don be closed by police', 'source': 'Facebook' },
-]
