@@ -126,15 +126,15 @@ def start_scheduler(app):
     # )
 
     # ── Telegram — every 30 seconds ──
-    scheduler.add_job(
-        func=run_telegram,
-        trigger=IntervalTrigger(seconds=30),
-        args=[app],
-        id='telegram_monitor',
-        name='Telegram Monitor',
-        replace_existing=True,
-        misfire_grace_time=15,
-    )
+    # scheduler.add_job(
+    #     func=run_telegram,
+    #     trigger=IntervalTrigger(seconds=30),
+    #     args=[app],
+    #     id='telegram_monitor',
+    #     name='Telegram Monitor',
+    #     replace_existing=True,
+    #     misfire_grace_time=15,
+    # )
 
     # ── Simulation fallback — every 3 minutes ──
     scheduler.add_job(
