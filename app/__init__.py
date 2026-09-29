@@ -50,7 +50,15 @@ def create_app():
     mail.init_app(app)
 
     # ── CORS — allow React on any port ──
-    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+    # CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+
+    CORS(app, resources={r"/api/*": {"origins": [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://crisiswatchapp-ng.vercel.app",
+        "https://crisiswatch-ng.vercel.app",
+    ]}}, supports_credentials=True)
+    
     # ── Register Blueprints (routes) ──
     from app.routes.auth      import auth_bp
     from app.routes.incidents import incidents_bp
