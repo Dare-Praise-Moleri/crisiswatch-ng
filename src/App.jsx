@@ -2,7 +2,7 @@
 //  App.jsx  —  CrisisWatch Lagos  (complete, all routes)
 // ─────────────────────────────────────────────────────────
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 // Theme must wrap everything
 import { ThemeProvider } from './context/ThemeContext';
@@ -59,7 +59,7 @@ export default function App() {
           <Route path="/settings"   element={<SettingsPage />}  />
 
           {/* 404 fallback */}
-          <Route path="*"           element={<HomePage />}      />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
 
         {/* Global toast overlay — must be inside ThemeProvider */}
